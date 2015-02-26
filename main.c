@@ -10,6 +10,7 @@
 //piface board
 #include <wiringPi.h>
 #include <piFace.h>
+#include <libwebsockets.h>
 
 //for catching system signals (SIGINT)
 #include  <signal.h>
@@ -31,6 +32,7 @@
 #include "main.h"
 
 #include "db-EXT.h"
+
 
 
 /*DEFINES*/
@@ -326,95 +328,147 @@ uint8_t ProcessCLIArguments(int32_t argc_s32, const char **argv_ptru8)
 	   @param[out]    *argv array containing command line parameters
 	   @return error code.
  * *************************************************************************/
+
+static int callback_http(struct libwebsocket_context * this,
+                         struct libwebsocket *wsi,
+                         enum libwebsocket_callback_reasons reason, void *user,
+                         void *in, size_t len)
+{
+    return 0;
+}
+
+static int callback_dumb_increment(struct libwebsocket_context * this,
+                                   struct libwebsocket *wsi,
+                                   enum libwebsocket_callback_reasons reason,
+                                   void *user, void *in, size_t len)
+{
+
+    switch (reason) {
+        case LWS_CALLBACK_ESTABLISHED: // just log message that someone is connecting
+            printf("connection established\n");
+            break;
+        case LWS_CALLBACK_RECEIVE: { // the funny part
+            // create a buffer to hold our response
+            // it has to have some pre and post padding. You don't need to care
+            // what comes there, libwebsockets will do everything for you. For more info see
+            // http://git.warmcat.com/cgi-bin/cgit/libwebsockets/tree/lib/libwebsockets.h#n597
+            unsigned char *buf = (unsigned char*) malloc(LWS_SEND_BUFFER_PRE_PADDING + len +
+                                                         LWS_SEND_BUFFER_POST_PADDING);
+
+            int i;
+
+            // pointer to `void *in` holds the incomming request
+            // we're just going to put it in reverse order and put it in `buf` with
+            // correct offset. `len` holds length of the request.
+            for (i=0; i < len; i++) {
+                buf[LWS_SEND_BUFFER_PRE_PADDING + (len - 1) - i ] = ((char *) in)[i];
+            }
+
+            // log what we recieved and what we're going to send as a response.
+            // that disco syntax `%.*s` is used to print just a part of our buffer
+            // http://stackoverflow.com/questions/5189071/print-part-of-char-array
+            printf("received data: %s, replying: %.*s\n", (char *) in, (int) len,
+                 buf + LWS_SEND_BUFFER_PRE_PADDING);
+
+            // send response
+            // just notice that we have to tell where exactly our response starts. That's
+            // why there's `buf[LWS_SEND_BUFFER_PRE_PADDING]` and how long it is.
+            // we know that our response has the same length as request because
+            // it's the same message in reverse order.
+            libwebsocket_write(wsi, &buf[LWS_SEND_BUFFER_PRE_PADDING], len, LWS_WRITE_TEXT);
+
+            // release memory back into the wild
+            free(buf);
+            break;
+        }
+        default:
+            break;
+    }
+
+
+    return 0;
+}
+
+ struct libwebsocket_protocols protocols[] = {
+    /* first protocol must always be HTTP handler */
+    {
+        "http-only",   // name
+        callback_http, // callback
+        0              // per_session_data_size
+    },
+    {
+        "dumb-increment-protocol", // protocol name - very important!
+        callback_dumb_increment,   // callback
+        0                          // we don't use any per session data
+
+    },
+    {
+        NULL, NULL, 0   /* End of list */
+    }
+};
+
 int main (int argc, char **argv)
 {
-  fprintf(stdout,"Welcome to Homey\n");
-  fprintf(stdout,"================\n");
+	// server url will be http://localhost:9000
+	int port = 9000;
+	const char *interface = NULL;
+	struct libwebsocket_context *context;
+	// we're not using ssl
+	const char *cert_path = NULL;
+	const char *key_path = NULL;
+	// no special options
+	int opts = 0;
 
-  signal(SIGINT, intHandler);
-  signal(SIGKILL, intHandler);
-  signal(SIGQUIT, intHandler);
+	struct lws_context_creation_info info;
+
+	memset(&info, 0, sizeof info);
+	info.port = port;
+	info.iface = interface;
+	info.protocols = protocols;
+	info.extensions = libwebsocket_get_internal_extensions();
+	//if (!use_ssl) {
+	info.ssl_cert_filepath = NULL;
+	info.ssl_private_key_filepath = NULL;
+	//} else {
+	// info.ssl_cert_filepath = LOCAL_RESOURCE_PATH"/libwebsockets-test-server.pem";
+	// info.ssl_private_key_filepath = LOCAL_RESOURCE_PATH"/libwebsockets-test-server.key.pem";
+	//}
+	info.gid = -1;
+	info.uid = -1;
+	info.options = opts;
+
+	context = libwebsocket_create_context(&info);
+	//------
 
   /*Initialize the Rapsberry board*/
   InitBoard();
   /*init sw variables*/
   InitSW();
 
-  /*process command line arguments  - call this after init sw*/
-  if (!ProcessCLIArguments(argc, (const char **)argv))
-  {
-	  CleanupAfterSigINT();
-	  exit(0);
-  }
-  else
-  {
-	  //nothing
-  }
+  //context = libwebsocket_create_context(port, interface, protocols,
+   //                                     libwebsocket_internal_extensions,
+   //                                     cert_path, key_path, -1, -1, opts);
 
-  do
-  {
-	  /*check how many devices are configured - needed by the menu system*/
-	  	numOfConfiguredDevices_u8 = getNumberOfConfiguredDevices();
-	    if (numOfConfiguredDevices_u8<1)
-	    {
-	      startupRetryCnt_u32++;
-	      fprintf(stdout,"\n No configured devices available. Retry (%d) in 10 seconds.", startupRetryCnt_u32);
-	  	  //*sleep for 10 seconds*/
-	  	  sleep (10);
-	    }
-	    else
-	    {
-	  	  //proceed
-
-	    }
-  }
-  while((numOfConfiguredDevices_u8<1) && (startupRetryCnt_u32 <= MAX_STARTUP_RETRY_COUNT)) ;
-
-  if (numOfConfiguredDevices_u8<1)
-  {
-	  fprintf(stdout,"\n No configured devices available. Process will now exit");
-	  //call cleanup functions
-	  CleanupAfterSigINT();
-	  exit(0);
-  }
-  else
-  {
-	  //proceed
-	  fprintf(stdout,"\n Number of configured devices: %d", numOfConfiguredDevices_u8);
-  }
-
+     if (context == NULL) {
+         fprintf(stderr, "libwebsocket init failed\n");
+         return -1;
+     }
+     printf("starting server...\n");
+     printf("starting server...\n");
 
   //entering main loops
   while(1)
   {
-	  if (sigINTReceived)
-	  {
-			fprintf(stdout,"\n Exiting now...\n");
-			//call cleanup functions
-			CleanupAfterSigINT();
-			exit(0);
-	  }
-	  else
-	  {
+	  libwebsocket_service(context, 50);
+	         // libwebsocket_service will process all waiting events with their
+	         // callback functions and then wait 50 ms.
+	         // (this is single threaded webserver and this will keep
+	         // our server from generating load while there are not
+	         // requests to process)
 
-	  }
-	  /*call the simple task scheduler*/
-	  TaskScheduler();
-	  /*advance task counter*/
-	  if (g_TaskCounter_u8 <= TASK_COUNTER_MAX_VAL)
-	  {
-		 		  //increment value
-		 g_TaskCounter_u8++;
-	  }
-	  else
-	  {
-		 g_TaskCounter_u8 = 1;
-	  }
-	  //sleep for 50ms
-	  usleep(50000);
-	  // mS
   }
-
+  libwebsocket_context_destroy(context);
+  return 0;
 }
 
 /* *************************************************************************
