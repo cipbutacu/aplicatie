@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+        <script type="text/javascript">
+            $(function() {
+                window.WebSocket = window.WebSocket || window.MozWebSocket;
+
+                var websocket = new WebSocket('ws://192.168.0.110:9000',
+                                              'dumb-increment-protocol');
+
+                websocket.onopen = function () {
+                    $('h1').css('color', 'green');
+                };
+
+                websocket.onerror = function () {
+                    $('h1').css('color', 'red');
+                };
+
+                websocket.onmessage = function (message) {
+                    console.log(message.data);
+                    $('div').append($('<p>', { text: message.data }));
+                };
+                
+
+                $('button').click(function(e) {
+                    e.preventDefault();
+                    websocket.send($('input').val());
+                    $('input').val('');
+                });
+				$(document.getElementById("inainte")).click(function(e) {
+                    e.preventDefault();
+                    websocket.send('1'); 
+                });
+				$(document.getElementById("inapoi")).click(function(e) {
+                    e.preventDefault();
+                    websocket.send('2');
+                });
+				$(document.getElementById("stanga")).click(function(e) {
+                    e.preventDefault();
+                    websocket.send('3');
+                });
+				$(document.getElementById("dreapta")).click(function(e) {
+                    e.preventDefault();
+                    websocket.send('4');
+                });
+				
+            });
+        </script>
+        </head>
+    <body>
+        <h1>WebSockets test</h1>
+        <form>
+            <input type="text" />
+			<button>Send</button>
+			</br>
+			<input type="button" id= "inainte" name = "1" value="Inainte"/>
+            <input type="button" id= "inapoi" name = "2" value="Inapoi"/>
+			<input type="button" id= "stanga" name = "3" value="Stanga"/>
+			<input type="button" id= "dreapta" name = "4" value="Dreapta"/>
+        </form>
+        <div></div>
+    </body>
+</html>
