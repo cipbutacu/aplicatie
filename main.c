@@ -443,7 +443,7 @@ int main (int argc, char **argv)
   /*Initialize the Rapsberry board*/
   InitBoard();
   /*init sw variables*/
-  InitSW();
+ // InitSW();
 
   //context = libwebsocket_create_context(port, interface, protocols,
    //                                     libwebsocket_internal_extensions,
